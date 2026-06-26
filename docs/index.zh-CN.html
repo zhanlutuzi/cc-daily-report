@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cc-daily-report — Claude Code 的站会与日结工作流</title>
+<meta name="description" content="自动捕获压缩前的上下文摘要，跨项目汇总，每天早上用一份回顾开启今天的工作。">
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-elev: #161b22;
+    --bg-card: #1c2128;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --text-faint: #6e7681;
+    --accent: #3fb950;
+    --accent-dim: #238636;
+    --accent-glow: rgba(63, 185, 80, 0.15);
+    --warn: #d29922;
+    --cron: #bc8cff;
+    --manual: #3fb950;
+    --compact: #d29922;
+    --review: #79c0ff;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  .mono { font-family: "SF Mono", "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace; }
+  .container { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(13, 17, 23, 0.85);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  nav .container { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+  .nav-brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--text); text-decoration: none; font-weight: 600; font-size: 15px;
+  }
+  .nav-brand .prompt { color: var(--accent); font-weight: 700; }
+  .nav-links { display: flex; gap: 24px; align-items: center; }
+  .nav-links a {
+    color: var(--text-dim); text-decoration: none; font-size: 14px; transition: color 0.15s;
+  }
+  .nav-links a:hover { color: var(--text); }
+  .nav-cta { border: 1px solid var(--border); padding: 6px 14px; border-radius: 6px; color: var(--text); }
+  .nav-cta:hover { border-color: var(--accent); color: var(--accent); }
+  .lang-switch {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 13px; color: var(--text-faint);
+    padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px;
+  }
+  .lang-switch:hover { border-color: var(--text-dim); }
+  .lang-switch .current { color: var(--accent); font-weight: 600; }
+  .lang-switch .sep { color: var(--text-faint); }
+
+  .hero { padding: 96px 0 64px; position: relative; overflow: hidden; }
+  .hero::before {
+    content: ""; position: absolute; top: -200px; left: 50%; transform: translateX(-50%);
+    width: 800px; height: 600px;
+    background: radial-gradient(ellipse at center, var(--accent-glow) 0%, transparent 60%);
+    pointer-events: none; z-index: 0;
+  }
+  .hero .container { position: relative; z-index: 1; }
+  .hero-tag {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--bg-elev); border: 1px solid var(--border);
+    padding: 6px 14px; border-radius: 999px; font-size: 13px; color: var(--text-dim); margin-bottom: 28px;
+  }
+  .hero-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .hero h1 {
+    font-size: clamp(40px, 6vw, 68px); line-height: 1.05; font-weight: 700;
+    letter-spacing: -0.03em; margin-bottom: 24px;
+  }
+  .hero h1 .accent { color: var(--accent); }
+  .hero h1 .slash { color: var(--text-faint); font-weight: 400; }
+  .hero-sub { font-size: 19px; color: var(--text-dim); max-width: 640px; margin-bottom: 40px; line-height: 1.6; }
+  .hero-ctas { display: flex; gap: 14px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 22px; border-radius: 8px; font-size: 15px; font-weight: 500;
+    text-decoration: none; transition: all 0.15s; border: 1px solid transparent;
+  }
+  .btn-primary {
+    background: var(--accent-dim); color: #fff;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.05) inset, 0 4px 14px rgba(35, 134, 54, 0.4);
+  }
+  .btn-primary:hover { background: var(--accent); transform: translateY(-1px); }
+  .btn-ghost { border-color: var(--border); color: var(--text); background: var(--bg-elev); }
+  .btn-ghost:hover { border-color: var(--text-dim); }
+
+  .terminal-wrap {
+    margin-top: 64px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+    background: var(--bg-card); box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+  }
+  .terminal-header {
+    display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+    background: var(--bg-elev); border-bottom: 1px solid var(--border);
+  }
+  .terminal-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .terminal-dot.red { background: #ff5f56; }
+  .terminal-dot.yellow { background: #ffbd2e; }
+  .terminal-dot.green { background: #27c93f; }
+  .terminal-title { color: var(--text-faint); font-size: 12px; margin-left: 8px; }
+  .terminal-body { padding: 24px; font-size: 14px; line-height: 1.75; color: var(--text); }
+  .terminal-body .cmd { color: var(--accent); }
+  .terminal-body .comment { color: var(--text-faint); }
+  .terminal-body .out { color: var(--text-dim); }
+  .terminal-body .emoji { color: var(--warn); }
+  .cursor {
+    display: inline-block; width: 8px; height: 16px; background: var(--accent);
+    vertical-align: text-bottom; animation: blink 1s steps(2) infinite; margin-left: 2px;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  section { padding: 80px 0; border-top: 1px solid var(--border); }
+  .section-label {
+    color: var(--accent); font-size: 13px; font-weight: 600;
+    letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 12px;
+  }
+  .section-title {
+    font-size: clamp(28px, 4vw, 40px); font-weight: 700;
+    letter-spacing: -0.02em; margin-bottom: 16px; line-height: 1.15;
+  }
+  .section-lead { font-size: 17px; color: var(--text-dim); max-width: 640px; margin-bottom: 48px; }
+
+  .day-flow { display: grid; grid-template-columns: 1fr; gap: 20px; }
+  .day-step {
+    display: grid; grid-template-columns: 80px 1fr; gap: 24px; align-items: start;
+    padding: 24px; background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: 10px; transition: border-color 0.2s, transform 0.2s;
+  }
+  .day-step:hover { border-color: var(--accent); transform: translateX(4px); }
+  .day-time { color: var(--accent); font-size: 13px; font-weight: 600; text-align: right; padding-top: 4px; }
+  .day-time .clock { display: block; color: var(--text-faint); font-size: 11px; font-weight: 400; margin-top: 4px; }
+  .day-body h3 { font-size: 17px; margin-bottom: 6px; }
+  .day-body .cmd {
+    color: var(--accent); background: var(--bg-card); padding: 2px 8px;
+    border-radius: 4px; font-size: 13px; display: inline-block; margin: 4px 0;
+  }
+  .day-body p { color: var(--text-dim); font-size: 15px; }
+
+  .components { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; }
+  .comp-card {
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+    padding: 24px; transition: all 0.2s;
+  }
+  .comp-card:hover { border-color: var(--text-faint); transform: translateY(-2px); }
+  .comp-tag {
+    display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 8px;
+    border-radius: 4px; margin-bottom: 14px; letter-spacing: 0.03em;
+  }
+  .comp-tag.compact { background: rgba(210, 153, 34, 0.15); color: var(--compact); }
+  .comp-tag.manual { background: rgba(63, 185, 80, 0.15); color: var(--manual); }
+  .comp-tag.cron { background: rgba(188, 140, 255, 0.15); color: var(--cron); }
+  .comp-tag.review { background: rgba(121, 192, 255, 0.15); color: var(--review); }
+  .comp-card h3 { font-size: 17px; margin-bottom: 8px; }
+  .comp-card .role { color: var(--text-faint); font-size: 13px; margin-bottom: 14px; }
+  .comp-card p { color: var(--text-dim); font-size: 14px; line-height: 1.65; }
+  .comp-meta {
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--text-faint); display: flex; justify-content: space-between;
+  }
+
+  .install-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  .install-step {
+    display: grid; grid-template-columns: 40px 1fr; gap: 20px;
+    padding: 20px 24px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .install-num {
+    width: 32px; height: 32px; border-radius: 50%; background: var(--bg-card);
+    border: 1px solid var(--accent); color: var(--accent);
+    display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px;
+  }
+  .install-body h3 { font-size: 16px; margin-bottom: 6px; }
+  .install-body p { color: var(--text-dim); font-size: 14px; margin-bottom: 10px; }
+  .install-body code, .install-body pre {
+    font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace; font-size: 13px;
+  }
+  .install-body pre {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px 14px; overflow-x: auto; color: var(--text); line-height: 1.6;
+  }
+  .install-body pre .c { color: var(--text-faint); }
+  .install-body pre .s { color: var(--warn); }
+
+  footer { padding: 48px 0; border-top: 1px solid var(--border); color: var(--text-faint); font-size: 14px; }
+  footer .container { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+  footer a { color: var(--text-dim); text-decoration: none; }
+  footer a:hover { color: var(--accent); }
+
+  @media (max-width: 640px) {
+    .hero { padding: 64px 0 48px; }
+    .day-step { grid-template-columns: 1fr; gap: 8px; }
+    .day-time { text-align: left; }
+    .nav-links a:not(.nav-cta):not(.lang-switch) { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container">
+    <a class="nav-brand mono" href="#">
+      <span class="prompt">$</span>
+      <span>cc-daily-report</span>
+    </a>
+    <div class="nav-links">
+      <a href="#workflow">工作流</a>
+      <a href="#components">组件</a>
+      <a href="#install">安装</a>
+      <a class="lang-switch mono" href="index.html">
+        <span class="current">中文</span>
+        <span class="sep">/</span>
+        <span>EN</span>
+      </a>
+      <a class="nav-cta" href="https://github.com/zhanlutuzi/cc-daily-report">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="container">
+    <div class="hero-tag">
+      <span class="dot"></span>
+      Claude Code 工作流
+    </div>
+    <h1>
+      站会回顾，<br>
+      下班日结，<br>
+      <span class="slash">全自动。</span>
+    </h1>
+    <p class="hero-sub">
+      上下文压缩前自动落盘，跨项目汇总，每天早上用一份回顾开启今天。四个组件，一个目录，零基础设施。
+    </p>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="#install">开始使用 →</a>
+      <a class="btn btn-ghost" href="https://github.com/zhanlutuzi/cc-daily-report">在 GitHub 查看</a>
+    </div>
+
+    <div class="terminal-wrap">
+      <div class="terminal-header">
+        <span class="terminal-dot red"></span>
+        <span class="terminal-dot yellow"></span>
+        <span class="terminal-dot green"></span>
+        <span class="terminal-title mono">claude — 早上</span>
+      </div>
+      <div class="terminal-body mono">
+<span class="cmd">/morning-review</span> <span class="comment">← 你输入这个</span>
+
+<span class="emoji">🌅</span> <strong>昨日回顾</strong>
+<span class="out">• hook：PostCompact hook 已上线 — 压缩前上下文自动落盘</span>
+<span class="out">• daily-summary：从单会话总结改成了跨会话汇总</span>
+<span class="out">• cron：每天 18:00 跑，PATH 要显式 export</span>
+
+<span class="out"><strong>未完成</strong>：morning-review 命令还没写完</span>
+
+<span class="out"><strong>今天</strong>：</span>
+<span class="out">1. morning-review 命令今天落地吗？</span>
+<span class="out">2. cron 首次执行是明天 18:00 — 要不要现在手动验证一次？</span>
+<span class="cursor"></span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="workflow">
+  <div class="container">
+    <div class="section-label">一个普通工作日</div>
+    <h2 class="section-title">闭环，从头到尾。</h2>
+    <p class="section-lead">一天里四个时刻。两个你主动触发，两个自动跑。四个全部写到同一个地方。</p>
+
+    <div class="day-flow">
+      <div class="day-step">
+        <div class="day-time">早上<span class="clock">~09:00</span></div>
+        <div class="day-body">
+          <h3>站会回顾</h3>
+          <div class="cmd mono">/morning-review</div>
+          <p>读过去 36h 的摘要卡片，提炼一份回顾，主动问你 2-3 个关于今天的具体问题。就这样 — 后面的对话从这里继续。</p>
+        </div>
+      </div>
+
+      <div class="day-step">
+        <div class="day-time">白天<span class="clock">事件触发</span></div>
+        <div class="day-body">
+          <h3>压缩快照</h3>
+          <div class="cmd mono">PostCompact hook 触发</div>
+          <p>每次 Claude Code 压缩会话时，hook 静默把压缩前的摘要存到 <span class="mono">~/.claude/summaries/</span>。你完全无感，但东西都在。</p>
+        </div>
+      </div>
+
+      <div class="day-step">
+        <div class="day-time">随时<span class="clock">按需</span></div>
+        <div class="day-body">
+          <h3>跨会话汇总</h3>
+          <div class="cmd mono">/daily-summary [关注方向]</div>
+          <p>扫描所有项目过去 24h 的会话，写一张跨项目总账卡片。完成一个阶段、想留节点时用它。</p>
+        </div>
+      </div>
+
+      <div class="day-step">
+        <div class="day-time">下班<span class="clock">18:00 cron</span></div>
+        <div class="day-body">
+          <h3>兜底</h3>
+          <div class="cmd mono">crontab → claude -p</div>
+          <p>你忘了。它没忘。cron 在 18:00 无头模式自动跑，不管你白天有没有手动触发，当天的汇总都会落盘。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="components">
+  <div class="container">
+    <div class="section-label">四个组件</div>
+    <h2 class="section-title">同一个目录，同一套命名。</h2>
+    <p class="section-lead">四个全部写到 <span class="mono">~/.claude/summaries/</span>，命名 <span class="mono">&lt;YYYYMMDD-HHMMSS&gt;-&lt;source&gt;-&lt;id&gt;.md</span>。frontmatter 里也带 source — 直接 grep 就行。</p>
+
+    <div class="components">
+      <div class="comp-card">
+        <span class="comp-tag compact mono">compact</span>
+        <h3>PostCompact hook</h3>
+        <div class="role mono">自动 · 当前会话</div>
+        <p>压缩前给上下文拍快照。PostCompact 输入里直接带 Claude 生成的摘要 — 不用额外调模型，落盘就行。</p>
+        <div class="comp-meta">
+          <span class="mono">compact-summary-card.sh</span>
+          <span>静默</span>
+        </div>
+      </div>
+
+      <div class="comp-card">
+        <span class="comp-tag manual mono">manual</span>
+        <h3>/daily-summary</h3>
+        <div class="role mono">按需 · 过去 24h</div>
+        <p>跨会话汇总。只取过去 24h 的消息 — 一个横跨多天的会话只贡献最近 24h 的部分。用当前会话的模型。</p>
+        <div class="comp-meta">
+          <span class="mono">daily-summary.md</span>
+          <span>斜杠命令</span>
+        </div>
+      </div>
+
+      <div class="comp-card">
+        <span class="comp-tag cron mono">cron</span>
+        <h3>crontab 兜底</h3>
+        <div class="role mono">定时 · 过去 24h</div>
+        <p>无头模式 <span class="mono">claude -p</span>。失败也落盘 — 早上看到一片空白不知道是没活动还是脚本挂了，这是设计上不允许的。</p>
+        <div class="comp-meta">
+          <span class="mono">daily-summary-cron.sh</span>
+          <span>每天 18:00</span>
+        </div>
+      </div>
+
+      <div class="comp-card">
+        <span class="comp-tag review mono">review</span>
+        <h3>/morning-review</h3>
+        <div class="role mono">按需 · 过去 36h</div>
+        <p>读摘要卡片（已经提炼过一次），二次提炼成回顾，最后抛出 2-3 个可决策的问题。不是总结 — 是对话的起点。</p>
+        <div class="comp-meta">
+          <span class="mono">morning-review.md</span>
+          <span>斜杠命令</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="container">
+    <div class="section-label">开始使用</div>
+    <h2 class="section-title">三步。</h2>
+    <p class="section-lead">或者直接 clone 仓库，让 Claude Code 帮你装。README 里有现成的 prompt。</p>
+
+    <div class="install-grid">
+      <div class="install-step">
+        <div class="install-num mono">1</div>
+        <div class="install-body">
+          <h3>拷贝文件</h3>
+          <p>在仓库根目录执行：</p>
+<pre><span class="c"># commands 和 hooks 拷到 ~/.claude/</span>
+cp commands/*.md ~/.claude/commands/
+cp hooks/*.sh   ~/.claude/hooks/
+chmod +x ~/.claude/hooks/*.sh
+mkdir -p ~/.claude/summaries</pre>
+        </div>
+      </div>
+
+      <div class="install-step">
+        <div class="install-num mono">2</div>
+        <div class="install-body">
+          <h3>注册 PostCompact hook</h3>
+          <p>合并到 <span class="mono">~/.claude/settings.json</span>：</p>
+<pre>{
+  <span class="s">"hooks"</span>: {
+    <span class="s">"PostCompact"</span>: [{
+      <span class="s">"matcher"</span>: <span class="s">"*"</span>,
+      <span class="s">"hooks"</span>: [{
+        <span class="s">"type"</span>: <span class="s">"command"</span>,
+        <span class="s">"command"</span>: <span class="s">"bash \"$HOME/.claude/hooks/compact-summary-card.sh\""</span>,
+        <span class="s">"timeout"</span>: 15
+      }]
+    }]
+  }
+}</pre>
+        </div>
+      </div>
+
+      <div class="install-step">
+        <div class="install-num mono">3</div>
+        <div class="install-body">
+          <h3>注册 crontab（可选）</h3>
+          <p>每天 18:00 — 改成你想要的时间：</p>
+<pre>(crontab -l 2>/dev/null; \
+  echo <span class="s">"0 18 * * * /bin/bash $HOME/.claude/hooks/daily-summary-cron.sh >> $HOME/.claude/summaries/cron.log 2>&1"</span>) \
+  | crontab -</pre>
+          <p style="margin-top:10px;color:var(--warn);font-size:13px">⚠ cron 环境的 PATH 极简 — 编辑 <span class="mono">daily-summary-cron.sh</span> 第 14 行，把 <span class="mono">claude</span> 和 <span class="mono">jq</span> 所在路径加进去。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div>
+      <span class="mono" style="color:var(--accent)">$</span>
+      cc-daily-report · MIT
+    </div>
+    <div>
+      <a href="https://github.com/zhanlutuzi/cc-daily-report">GitHub</a> ·
+      <a href="https://gist.github.com/zhanlutuzi/2807536ae4bc71ea1da2521e9570291a">原始文章</a> ·
+      <a href="index.html">English</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
