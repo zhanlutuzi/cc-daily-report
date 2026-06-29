@@ -49,7 +49,7 @@ Four pieces make this work. Here's how to set them up.
 
 - [Claude Code](https://claude.com/claude-code) CLI (`claude` on your PATH)
 - `jq`
-- `bash` 4+ (the cron script uses `mapfile`)
+- `bash` 3.2+ (works on macOS system bash; uses `while read` instead of `mapfile`)
 
 ```bash
 which claude jq
@@ -260,7 +260,9 @@ SUMMARIES_DIR="$HOME/.claude/summaries"
 mkdir -p "$SUMMARIES_DIR"
 
 # find -mtime -1 just DISCOVERS files that might have recent messages (perf)
-mapfile -r sessions < <(find "$PROJECTS_DIR" -name "*.jsonl" -mtime -1 2>/dev/null)
+# while-read instead of mapfile — macOS system bash is 3.2
+sessions=()
+while IFS= read -r line; do sessions+=("$line"); done < <(find "$PROJECTS_DIR" -name "*.jsonl" -mtime -1 2>/dev/null)
 
 # Concatenate each session's text; on extract, filter again by message timestamp (correctness)
 for f in "${sessions[@]}"; do
@@ -354,6 +356,8 @@ grep -l "source: cron" ~/.claude/summaries/*.md   # by source
 10. **`$ARGUMENTS`** in slash commands — it's the placeholder for user arguments
 11. **Timestamps carry millis** — `fromdateiso8601` only takes whole seconds; `gsub("\\.\\d+Z$"; "Z")` to strip them
 12. **Multi-day sessions only contribute their last 24h** — `find -mtime -1` is for discovery (perf); on extract, filter again by message `timestamp` (correctness)
+13. **No `mapfile`** — macOS system bash is 3.2 (2007); `mapfile` needs bash 4+. Use `while IFS= read -r line; do arr+=("$line"); done` instead
+14. **`${var}` not `$var` before CJK chars** — bash 3.2's locale treats some CJK bytes as valid variable-name bytes, so `$ts_human）` (Chinese paren) parses as `${ts_human）}` → unbound. Always use `${ts_human}`
 
 ## Design choices
 

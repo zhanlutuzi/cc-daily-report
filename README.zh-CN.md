@@ -47,7 +47,7 @@
 
 - [Claude Code](https://claude.com/claude-code) CLI（`claude` 命令可用）
 - `jq`（解析 hook 输入和会话 jsonl）
-- `bash` 4+（cron 脚本用了 `mapfile`）
+- `bash` 3.2+（macOS 系统 bash 也能跑；用 `while read` 代替 `mapfile`）
 
 ```bash
 which claude jq
@@ -258,7 +258,9 @@ SUMMARIES_DIR="$HOME/.claude/summaries"
 mkdir -p "$SUMMARIES_DIR"
 
 # 用 find -mtime -1 发现可能包含近 24h 消息的文件（性能优化）
-mapfile -r sessions < <(find "$PROJECTS_DIR" -name "*.jsonl" -mtime -1 2>/dev/null)
+# 用 while-read 代替 mapfile — macOS 系统 bash 是 3.2 版本
+sessions=()
+while IFS= read -r line; do sessions+=("$line"); done < <(find "$PROJECTS_DIR" -name "*.jsonl" -mtime -1 2>/dev/null)
 
 # 拼接所有会话文本，提取时按消息 timestamp 再过滤一次（只保留真正近 24h 的消息）
 for f in "${sessions[@]}"; do
@@ -354,6 +356,8 @@ grep -l "source: cron" ~/.claude/summaries/*.md  # 按来源筛
 10. **斜杠命令的 `$ARGUMENTS`**：是参数占位符，用户输入会替换进去
 11. **时间戳带毫秒**：`fromdateiso8601` 只吃整秒，要 `gsub("\\.\\d+Z$"; "Z")` 去毫秒
 12. **跨天会话只取近 24h**：`find -mtime -1` 只用于发现文件，提取时必须按消息 `timestamp` 再过滤一次
+13. **不要用 `mapfile`**：macOS 系统 bash 是 3.2（2007 年的），`mapfile` 要 bash 4+。用 `while IFS= read -r line; do arr+=("$line"); done` 代替
+14. **CJK 字符前的变量要用 `${}`**：bash 3.2 的 locale 把某些中文字节当合法变量名字节，`$ts_human）`（中文括号）会被解析成 `${ts_human）}` → 报 unbound。一律用 `${ts_human}`
 
 ## 设计取舍说明
 
